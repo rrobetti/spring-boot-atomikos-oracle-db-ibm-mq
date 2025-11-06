@@ -33,6 +33,7 @@ class MessageProcessingIntegrationTest {
             .withDatabaseName("XEPDB1")
             .withUsername("testuser")
             .withPassword("testpass")
+            .withStartupTimeout(Duration.ofMinutes(5))
             .withReuse(false);
 
     @Container
