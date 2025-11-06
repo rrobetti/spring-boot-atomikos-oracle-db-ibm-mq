@@ -5,6 +5,8 @@ import com.atomikos.icatch.jta.UserTransactionManager;
 import com.atomikos.jdbc.AtomikosDataSourceBean;
 import com.ibm.mq.jms.MQXAConnectionFactory;
 import com.ibm.msg.client.wmq.common.CommonConstants;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -21,6 +23,8 @@ import java.util.Properties;
 
 @Configuration
 public class AtomikosConfig {
+    
+    private static final Logger logger = LoggerFactory.getLogger(AtomikosConfig.class);
 
     @Value("${spring.datasource.url}")
     private String dbUrl;
@@ -121,11 +125,22 @@ public class AtomikosConfig {
     @Bean
     public MQXAConnectionFactory mqXAConnectionFactory() throws Exception {
         MQXAConnectionFactory factory = new MQXAConnectionFactory();
-        String host = connName.split("\\(")[0];
-        int port = 1414;
-        if (connName.contains("(")) {
-            port = Integer.parseInt(connName.split("\\(")[1].replace(")", ""));
+        
+        // Parse connection string in format: host(port)
+        String host = connName;
+        int port = 1414; // Default IBM MQ port
+        
+        if (connName.contains("(") && connName.contains(")")) {
+            int parenIndex = connName.indexOf("(");
+            host = connName.substring(0, parenIndex);
+            String portStr = connName.substring(parenIndex + 1, connName.indexOf(")"));
+            try {
+                port = Integer.parseInt(portStr);
+            } catch (NumberFormatException e) {
+                logger.warn("Invalid port in connection string: {}, using default port 1414", connName);
+            }
         }
+        
         factory.setHostName(host);
         factory.setPort(port);
         factory.setQueueManager(queueManager);

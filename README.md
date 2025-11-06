@@ -13,7 +13,7 @@ All operations are wrapped in a distributed transaction managed by Atomikos, ens
 ## Architecture
 
 - **Spring Boot 2.7.18**: Application framework
-- **Atomikos 6.0.0**: JTA/XA transaction manager for distributed transactions
+- **Atomikos 5.0.9**: JTA/XA transaction manager for distributed transactions
 - **Oracle Database**: Persistence layer
 - **IBM MQ**: Message queuing system
 - **Hibernate 5.6**: ORM for database operations

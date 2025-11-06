@@ -57,8 +57,17 @@ public class MessageProcessingService {
             jmsTemplate.convertAndSend(OUTPUT_QUEUE, outputMessage);
             logger.info("Published message to output queue: {}", outputMessage);
 
+        } catch (com.fasterxml.jackson.core.JsonProcessingException e) {
+            logger.error("Failed to parse JSON message: {}", messageText, e);
+            throw new RuntimeException("Invalid JSON message format", e);
+        } catch (org.springframework.dao.DataAccessException e) {
+            logger.error("Database error while processing message", e);
+            throw new RuntimeException("Failed to save message to database", e);
+        } catch (org.springframework.jms.JmsException e) {
+            logger.error("JMS error while publishing message", e);
+            throw new RuntimeException("Failed to publish message to output queue", e);
         } catch (Exception e) {
-            logger.error("Error processing message", e);
+            logger.error("Unexpected error processing message", e);
             throw new RuntimeException("Failed to process message", e);
         }
     }
