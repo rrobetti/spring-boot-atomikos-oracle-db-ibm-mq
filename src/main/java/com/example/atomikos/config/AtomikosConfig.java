@@ -10,7 +10,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.DependsOn;
 import org.springframework.jms.core.JmsTemplate;
-import org.springframework.jms.listener.DefaultMessageListenerContainer;
 import org.springframework.orm.jpa.JpaVendorAdapter;
 import org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean;
 import org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter;
@@ -51,6 +50,7 @@ public class AtomikosConfig {
     public UserTransactionManager atomikosTransactionManager() {
         UserTransactionManager userTransactionManager = new UserTransactionManager();
         userTransactionManager.setForceShutdown(false);
+        AtomikosJtaPlatform.transactionManager = userTransactionManager;
         return userTransactionManager;
     }
 
@@ -58,6 +58,7 @@ public class AtomikosConfig {
     public UserTransactionImp atomikosUserTransaction() throws Exception {
         UserTransactionImp userTransactionImp = new UserTransactionImp();
         userTransactionImp.setTransactionTimeout(300);
+        AtomikosJtaPlatform.transaction = userTransactionImp;
         return userTransactionImp;
     }
 
@@ -94,6 +95,7 @@ public class AtomikosConfig {
     }
 
     @Bean
+    @DependsOn({"atomikosTransactionManager", "atomikosUserTransaction"})
     public LocalContainerEntityManagerFactoryBean entityManagerFactory() {
         LocalContainerEntityManagerFactoryBean emf = new LocalContainerEntityManagerFactoryBean();
         emf.setDataSource(dataSource());
@@ -106,7 +108,7 @@ public class AtomikosConfig {
         jpaProperties.setProperty("hibernate.hbm2ddl.auto", "update");
         jpaProperties.setProperty("hibernate.dialect", "org.hibernate.dialect.Oracle12cDialect");
         jpaProperties.setProperty("hibernate.transaction.jta.platform", 
-                                  "com.atomikos.icatch.jta.hibernate5.AtomikosPlatform");
+                                  "com.example.atomikos.config.AtomikosJtaPlatform");
         jpaProperties.setProperty("javax.persistence.transactionType", "JTA");
         jpaProperties.setProperty("hibernate.current_session_context_class", "jta");
         jpaProperties.setProperty("hibernate.show_sql", "true");
@@ -157,12 +159,11 @@ public class AtomikosConfig {
     }
 
     @Bean
-    public DefaultMessageListenerContainer jmsListenerContainerFactory() throws Exception {
-        DefaultMessageListenerContainer container = new DefaultMessageListenerContainer();
-        container.setConnectionFactory(atomikosConnectionFactory());
-        container.setSessionTransacted(true);
-        container.setConcurrentConsumers(1);
-        container.setMaxConcurrentConsumers(1);
-        return container;
+    public org.springframework.jms.config.JmsListenerContainerFactory<?> jmsListenerContainerFactory() throws Exception {
+        org.springframework.jms.config.DefaultJmsListenerContainerFactory factory = new org.springframework.jms.config.DefaultJmsListenerContainerFactory();
+        factory.setConnectionFactory(atomikosConnectionFactory());
+        factory.setSessionTransacted(true);
+        factory.setConcurrency("1-1");
+        return factory;
     }
 }
