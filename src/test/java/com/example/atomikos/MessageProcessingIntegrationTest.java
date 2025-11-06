@@ -1,10 +1,12 @@
 package com.example.atomikos;
 
+import com.example.atomikos.config.TestJmsConfig;
 import com.example.atomikos.entity.MessageData;
 import com.example.atomikos.repository.MessageDataRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.context.annotation.Import;
 import org.springframework.jms.core.JmsTemplate;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -23,6 +25,7 @@ import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest
 @Testcontainers
+@Import(TestJmsConfig.class)
 class MessageProcessingIntegrationTest {
 
     @Container
