@@ -22,14 +22,18 @@ import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.oracle.OracleContainer;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.utility.TestcontainersConfiguration;
 
 import javax.jms.*;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Duration;
+import java.util.List;
 import java.util.UUID;
 
 import static org.awaitility.Awaitility.await;
@@ -63,6 +67,52 @@ import static org.junit.jupiter.api.Assertions.*;
 @Testcontainers
 @Import({TestJmsConfig.class, AdminJmsConfig.class})
 class MessageProcessingIntegrationTest {
+
+    // ------------------------------------------------------------------
+    // Docker socket auto-detection for rootless / non-standard Ubuntu installs.
+    //
+    // Testcontainers always tries TestcontainersHostPropertyClientProviderStrategy
+    // FIRST. That strategy reads "tc.host" from ~/.testcontainers.properties.
+    // Setting it here (before any @Container field is initialised) makes
+    // Testcontainers use the detected socket even when DOCKER_HOST is not set
+    // in the environment (common for rootless Docker on Ubuntu).
+    // ------------------------------------------------------------------
+    static {
+        // Only auto-detect when neither the environment variable nor the user
+        // property has already been configured.
+        if (System.getenv("DOCKER_HOST") == null
+                && TestcontainersConfiguration.getInstance().getUserProperty("tc.host", null) == null) {
+            String uid = "1000"; // safe default
+            try {
+                uid = Files.readString(Paths.get("/proc/self/status"))
+                        .lines()
+                        .filter(l -> l.startsWith("Uid:"))
+                        .findFirst()
+                        .map(l -> l.split("\\s+")[1])
+                        .orElse(uid);
+            } catch (Exception ignored) { /* non-Linux: keep default */ }
+
+            List<String> candidates = List.of(
+                    "/var/run/docker.sock",
+                    System.getProperty("user.home") + "/.docker/run/docker.sock",
+                    System.getProperty("user.home") + "/.docker/desktop/docker.sock",
+                    "/run/user/" + uid + "/docker.sock"
+            );
+
+            for (String path : candidates) {
+                if (Files.exists(Paths.get(path))) {
+                    // tc.host is the officially supported property for
+                    // TestcontainersHostPropertyClientProviderStrategy.
+                    // updateUserConfig updates in-memory state AND persists
+                    // the value to ~/.testcontainers.properties so subsequent
+                    // runs also benefit from the detection.
+                    TestcontainersConfiguration.getInstance()
+                            .updateUserConfig("tc.host", "unix://" + path);
+                    break;
+                }
+            }
+        }
+    }
 
     // ------------------------------------------------------------------
     // Shared Docker network so Toxiproxy can reach Oracle and MQ by hostname

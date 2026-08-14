@@ -73,10 +73,38 @@ Exact `PREPARE` / `COMMIT` / recovery fault injection will be added in follow-up
 
 ## Prerequisites
 
-- Docker installed and running
+- Docker installed and running (see **Docker setup on Ubuntu** below)
 - Maven 3.6+
 - Java 17+
 - Sufficient memory for containers (recommended: 8 GB+ RAM)
+
+### Docker setup on Ubuntu
+
+If you see `Could not find a valid Docker environment` when running the tests, the most
+common causes are:
+
+**1. Missing docker group membership (standard Docker Engine)**
+
+```bash
+sudo usermod -aG docker $USER
+# Log out and log back in for the change to take effect
+# Then verify:
+docker ps
+```
+
+**2. Rootless Docker (socket at a non-default path)**
+
+```bash
+# Find the actual socket path
+docker context inspect | grep Host
+
+# Export the socket in your shell or add it to your IntelliJ run configuration
+export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
+```
+
+On the first test run the test's static initialiser also probes common socket paths
+and writes the detected value to `~/.testcontainers.properties` automatically, so
+subsequent runs from the same user account will work without exporting `DOCKER_HOST`.
 
 ## Running Tests
 
@@ -103,6 +131,10 @@ mvn test -Dtest=MessageProcessingIntegrationTest#baselineXaFlow_messageProcessed
 ---
 
 ## Troubleshooting
+
+### Could not find a valid Docker environment
+
+See the **Docker setup on Ubuntu** section under Prerequisites above.
 
 ### Tests Timeout
 
