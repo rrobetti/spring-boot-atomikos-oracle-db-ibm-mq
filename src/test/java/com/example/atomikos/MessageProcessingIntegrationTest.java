@@ -94,6 +94,7 @@ class MessageProcessingIntegrationTest {
 
             List<String> candidates = List.of(
                     "/var/run/docker.sock",
+                    "/run/user/docker.sock",
                     System.getProperty("user.home") + "/.docker/run/docker.sock",
                     System.getProperty("user.home") + "/.docker/desktop/docker.sock",
                     "/run/user/" + uid + "/docker.sock"
