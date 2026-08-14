@@ -37,10 +37,9 @@ class MessageProcessingIntegrationTest {
 
     @Container
     static OracleContainer oracleContainer = new OracleContainer("gvenzl/oracle-free:23-slim-faststart")
-            .withDatabaseName("XEPDB1")
             .withUsername("testuser")
             .withPassword("testpass")
-            .withStartupTimeout(Duration.ofMinutes(5))
+            .withStartupTimeout(Duration.ofMinutes(10))
             .withReuse(false);
 
     @Container
