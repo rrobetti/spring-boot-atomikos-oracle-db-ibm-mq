@@ -28,6 +28,13 @@ import static org.junit.jupiter.api.Assertions.*;
 @Import(TestJmsConfig.class)
 class MessageProcessingIntegrationTest {
 
+    static {
+        // docker-java defaults to API version 1.32 in URL requests; newer Docker daemons
+        // require a minimum of 1.40. Setting this system property before Testcontainers
+        // initialises its Docker client ensures a compatible version is negotiated.
+        System.setProperty("DOCKER_API_VERSION", "1.41");
+    }
+
     @Container
     static OracleContainer oracleContainer = new OracleContainer("gvenzl/oracle-free:23-slim-faststart")
             .withDatabaseName("XEPDB1")
