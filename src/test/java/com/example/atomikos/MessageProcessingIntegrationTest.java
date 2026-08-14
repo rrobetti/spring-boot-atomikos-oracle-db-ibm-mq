@@ -29,10 +29,10 @@ import static org.junit.jupiter.api.Assertions.*;
 class MessageProcessingIntegrationTest {
 
     static {
-        // docker-java defaults to API version 1.32 in URL requests; newer Docker daemons
-        // require a minimum of 1.40. Setting this system property before Testcontainers
-        // initialises its Docker client ensures a compatible version is negotiated.
-        System.setProperty("DOCKER_API_VERSION", "1.41");
+        // docker-java reads its API version from the "api.version" JVM system property
+        // (via DefaultDockerClientConfig.createDefaultConfigBuilder → properties.getProperty("api.version")).
+        // Without this, it defaults to 1.32, which newer Docker daemons reject (minimum 1.40).
+        System.setProperty("api.version", "1.41");
     }
 
     @Container
