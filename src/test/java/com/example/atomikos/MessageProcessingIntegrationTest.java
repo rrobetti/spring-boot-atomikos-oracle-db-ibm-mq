@@ -5,6 +5,7 @@ import com.example.atomikos.entity.MessageData;
 import com.example.atomikos.repository.MessageDataRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jms.core.JmsTemplate;
@@ -53,6 +54,7 @@ class MessageProcessingIntegrationTest {
             .withStartupTimeout(Duration.ofMinutes(3));
 
     @Autowired
+    @Qualifier("testJmsTemplate")
     private JmsTemplate jmsTemplate;
 
     @Autowired
