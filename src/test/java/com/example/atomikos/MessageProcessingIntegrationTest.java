@@ -50,8 +50,8 @@ class MessageProcessingIntegrationTest {
             .withEnv("MQ_APP_PASSWORD", "passw0rd")
             .withEnv("MQ_ADMIN_PASSWORD", "passw0rd")
             .withExposedPorts(1414, 9443)
-            .waitingFor(Wait.forLogMessage(".*Started web server.*", 1))
-            .withStartupTimeout(Duration.ofMinutes(3));
+            .waitingFor(Wait.forListeningPort())
+            .withStartupTimeout(Duration.ofMinutes(5));
 
     @Autowired
     @Qualifier("testJmsTemplate")
