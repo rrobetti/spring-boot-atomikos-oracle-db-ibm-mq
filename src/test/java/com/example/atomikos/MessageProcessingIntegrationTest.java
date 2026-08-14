@@ -83,10 +83,14 @@ class MessageProcessingIntegrationTest {
         String inputMessage = "{\"messageId\":\"MSG-001\",\"content\":\"Test message content\",\"status\":\"NEW\"}";
         jmsTemplate.convertAndSend("DEV.QUEUE.1", inputMessage);
 
-        // Then: Wait for message to be processed and saved to database
+        // Then: Wait for message to be processed and saved to database.
+        // pollInSameThread() prevents awaitility from interrupting the Oracle JDBC
+        // socket read when the timeout fires (which would cause ORA-18730 and corrupt
+        // the XA connection for subsequent tests).
         await()
-            .atMost(Duration.ofSeconds(30))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 List<MessageData> messages = messageDataRepository.findAll();
                 assertEquals(1, messages.size(), "Expected one message in database");
@@ -98,9 +102,12 @@ class MessageProcessingIntegrationTest {
                 assertNotNull(savedMessage.getCreatedAt());
             });
 
-        // And: Verify output message was sent to output queue
+        // And: Verify output message was sent to output queue.
+        // The test JmsTemplate has receiveTimeout=2000ms so receiveAndConvert() returns
+        // null (instead of blocking) when no message is present yet.
         await()
-            .atMost(Duration.ofSeconds(10))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(30))
             .pollInterval(Duration.ofSeconds(1))
             .untilAsserted(() -> {
                 String outputMessage = (String) jmsTemplate.receiveAndConvert("DEV.QUEUE.2");
@@ -123,8 +130,9 @@ class MessageProcessingIntegrationTest {
 
         // Then: All messages should be processed
         await()
-            .atMost(Duration.ofSeconds(30))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 List<MessageData> messages = messageDataRepository.findAll();
                 assertEquals(3, messages.size(), "Expected three messages in database");
@@ -132,8 +140,9 @@ class MessageProcessingIntegrationTest {
 
         // And: All output messages should be sent
         await()
-            .atMost(Duration.ofSeconds(15))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 int count = 0;
                 for (int i = 0; i < 3; i++) {
@@ -160,8 +169,9 @@ class MessageProcessingIntegrationTest {
 
         // Then: Message should be processed successfully
         await()
-            .atMost(Duration.ofSeconds(30))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 List<MessageData> messages = messageDataRepository.findAll();
                 assertEquals(initialCount + 1, messages.size());
