@@ -97,7 +97,7 @@ class MessageProcessingIntegrationTest {
     static final ToxiproxyContainer toxiproxyContainer =
             new ToxiproxyContainer(DockerImageName.parse("ghcr.io/shopify/toxiproxy:2.7.0"))
                     .withNetwork(NETWORK)
-                    .withExposedPorts(8666, 8667); // Oracle proxy + MQ proxy
+                    .withExposedPorts(8474, 8666, 8667); // 8474=control, 8666=Oracle proxy, 8667=MQ proxy
 
     static ToxiproxyTestSupport toxiproxy;
 

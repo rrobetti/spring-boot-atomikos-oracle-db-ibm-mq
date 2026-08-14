@@ -177,6 +177,7 @@ public class AtomikosConfig {
     public org.springframework.jms.config.JmsListenerContainerFactory<?> jmsListenerContainerFactory() throws Exception {
         org.springframework.jms.config.DefaultJmsListenerContainerFactory factory = new org.springframework.jms.config.DefaultJmsListenerContainerFactory();
         factory.setConnectionFactory(atomikosConnectionFactory());
+        factory.setTransactionManager(transactionManager());
         factory.setSessionTransacted(true);
         factory.setConcurrency("1-1");
         return factory;
