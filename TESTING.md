@@ -136,6 +136,21 @@ mvn test -Dtest=MessageProcessingIntegrationTest#baselineXaFlow_messageProcessed
 
 See the **Docker setup on Ubuntu** section under Prerequisites above.
 
+### client version 1.32 is too old (minikube conflict)
+
+If you have minikube installed it may export `DOCKER_API_VERSION=1.32` into your shell, which
+causes `docker-java` to negotiate a version that is too old for newer Docker daemons.
+
+```bash
+unset DOCKER_API_VERSION
+mvn test
+```
+
+Alternatively, add `unset DOCKER_API_VERSION` to your shell profile before the `minikube` eval
+line, so it is cleared automatically. The project uses Testcontainers 1.20.x / docker-java 3.4.x
+which performs automatic API version negotiation; the upgrade resolves this in most cases even
+without unsetting the variable.
+
 ### Tests Timeout
 
 Pull images beforehand:
