@@ -75,6 +75,7 @@ public class AtomikosConfig {
         JtaTransactionManager jtaTransactionManager = new JtaTransactionManager();
         jtaTransactionManager.setTransactionManager(utm);
         jtaTransactionManager.setUserTransaction(uti);
+        jtaTransactionManager.setDefaultTimeout(300);
         jtaTransactionManager.setAllowCustomIsolationLevels(true);
         return jtaTransactionManager;
     }
