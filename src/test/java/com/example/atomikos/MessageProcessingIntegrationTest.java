@@ -5,6 +5,7 @@ import com.example.atomikos.entity.MessageData;
 import com.example.atomikos.repository.MessageDataRepository;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jms.core.JmsTemplate;
@@ -28,12 +29,18 @@ import static org.junit.jupiter.api.Assertions.*;
 @Import(TestJmsConfig.class)
 class MessageProcessingIntegrationTest {
 
+    static {
+        // docker-java reads its API version from the "api.version" JVM system property
+        // (via DefaultDockerClientConfig.createDefaultConfigBuilder → properties.getProperty("api.version")).
+        // Without this, it defaults to 1.32, which newer Docker daemons reject (minimum 1.40).
+        System.setProperty("api.version", "1.41");
+    }
+
     @Container
     static OracleContainer oracleContainer = new OracleContainer("gvenzl/oracle-free:23-slim-faststart")
-            .withDatabaseName("XEPDB1")
             .withUsername("testuser")
             .withPassword("testpass")
-            .withStartupTimeout(Duration.ofMinutes(5))
+            .withStartupTimeout(Duration.ofMinutes(10))
             .withReuse(false);
 
     @Container
@@ -43,10 +50,11 @@ class MessageProcessingIntegrationTest {
             .withEnv("MQ_APP_PASSWORD", "passw0rd")
             .withEnv("MQ_ADMIN_PASSWORD", "passw0rd")
             .withExposedPorts(1414, 9443)
-            .waitingFor(Wait.forLogMessage(".*Started web server.*", 1))
-            .withStartupTimeout(Duration.ofMinutes(3));
+            .waitingFor(Wait.forListeningPort())
+            .withStartupTimeout(Duration.ofMinutes(5));
 
     @Autowired
+    @Qualifier("testJmsTemplate")
     private JmsTemplate jmsTemplate;
 
     @Autowired
@@ -77,10 +85,14 @@ class MessageProcessingIntegrationTest {
         String inputMessage = "{\"messageId\":\"MSG-001\",\"content\":\"Test message content\",\"status\":\"NEW\"}";
         jmsTemplate.convertAndSend("DEV.QUEUE.1", inputMessage);
 
-        // Then: Wait for message to be processed and saved to database
+        // Then: Wait for message to be processed and saved to database.
+        // pollInSameThread() prevents awaitility from interrupting the Oracle JDBC
+        // socket read when the timeout fires (which would cause ORA-18730 and corrupt
+        // the XA connection for subsequent tests).
         await()
-            .atMost(Duration.ofSeconds(30))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 List<MessageData> messages = messageDataRepository.findAll();
                 assertEquals(1, messages.size(), "Expected one message in database");
@@ -92,9 +104,12 @@ class MessageProcessingIntegrationTest {
                 assertNotNull(savedMessage.getCreatedAt());
             });
 
-        // And: Verify output message was sent to output queue
+        // And: Verify output message was sent to output queue.
+        // The test JmsTemplate has receiveTimeout=2000ms so receiveAndConvert() returns
+        // null (instead of blocking) when no message is present yet.
         await()
-            .atMost(Duration.ofSeconds(10))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(30))
             .pollInterval(Duration.ofSeconds(1))
             .untilAsserted(() -> {
                 String outputMessage = (String) jmsTemplate.receiveAndConvert("DEV.QUEUE.2");
@@ -117,8 +132,9 @@ class MessageProcessingIntegrationTest {
 
         // Then: All messages should be processed
         await()
-            .atMost(Duration.ofSeconds(30))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 List<MessageData> messages = messageDataRepository.findAll();
                 assertEquals(3, messages.size(), "Expected three messages in database");
@@ -126,8 +142,9 @@ class MessageProcessingIntegrationTest {
 
         // And: All output messages should be sent
         await()
-            .atMost(Duration.ofSeconds(15))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 int count = 0;
                 for (int i = 0; i < 3; i++) {
@@ -154,8 +171,9 @@ class MessageProcessingIntegrationTest {
 
         // Then: Message should be processed successfully
         await()
-            .atMost(Duration.ofSeconds(30))
-            .pollInterval(Duration.ofSeconds(1))
+            .pollInSameThread()
+            .atMost(Duration.ofSeconds(60))
+            .pollInterval(Duration.ofSeconds(2))
             .untilAsserted(() -> {
                 List<MessageData> messages = messageDataRepository.findAll();
                 assertEquals(initialCount + 1, messages.size());

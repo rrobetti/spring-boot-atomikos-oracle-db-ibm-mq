@@ -75,6 +75,7 @@ public class AtomikosConfig {
         JtaTransactionManager jtaTransactionManager = new JtaTransactionManager();
         jtaTransactionManager.setTransactionManager(utm);
         jtaTransactionManager.setUserTransaction(uti);
+        jtaTransactionManager.setDefaultTimeout(300);
         jtaTransactionManager.setAllowCustomIsolationLevels(true);
         return jtaTransactionManager;
     }
@@ -177,6 +178,7 @@ public class AtomikosConfig {
     public org.springframework.jms.config.JmsListenerContainerFactory<?> jmsListenerContainerFactory() throws Exception {
         org.springframework.jms.config.DefaultJmsListenerContainerFactory factory = new org.springframework.jms.config.DefaultJmsListenerContainerFactory();
         factory.setConnectionFactory(atomikosConnectionFactory());
+        factory.setTransactionManager(transactionManager());
         factory.setSessionTransacted(true);
         factory.setConcurrency("1-1");
         return factory;
