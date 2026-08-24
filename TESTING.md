@@ -139,17 +139,21 @@ See the **Docker setup on Ubuntu** section under Prerequisites above.
 ### client version 1.32 is too old (minikube conflict)
 
 If you have minikube installed it may export `DOCKER_API_VERSION=1.32` into your shell, which
-causes `docker-java` to negotiate a version that is too old for newer Docker daemons.
+causes `docker-java` to send that version to the Docker daemon. Docker daemons built after 2020
+require a minimum API version of `1.40` and reject `1.32` with this error.
 
+**`mvn test` is not affected** — the Maven Surefire plugin is configured to set
+`DOCKER_API_VERSION=1.41` in the forked test JVM, overriding whatever the shell exports.
+
+**Running tests from an IDE** (IntelliJ / Eclipse): add the environment variable to your run
+configuration:
+```
+DOCKER_API_VERSION=1.41
+```
+Or unset it in your shell before launching the IDE:
 ```bash
 unset DOCKER_API_VERSION
-mvn test
 ```
-
-Alternatively, add `unset DOCKER_API_VERSION` to your shell profile before the `minikube` eval
-line, so it is cleared automatically. The project uses Testcontainers 1.20.x / docker-java 3.4.x
-which performs automatic API version negotiation; the upgrade resolves this in most cases even
-without unsetting the variable.
 
 ### Tests Timeout
 
