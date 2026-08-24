@@ -144,6 +144,18 @@
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <configuration>
+                    <systemPropertyVariables>
+                        <!-- docker-java reads Docker API version from "api.version" JVM system property.
+                             Without this, it defaults to 1.32, which is rejected by Docker daemons
+                             that require a minimum API version of 1.40. -->
+                        <api.version>1.41</api.version>
+                    </systemPropertyVariables>
+                </configuration>
+            </plugin>
         </plugins>
     </build>
 </project>
