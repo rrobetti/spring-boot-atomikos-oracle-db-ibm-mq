@@ -2,14 +2,109 @@
 
 ## Overview
 
-This project includes comprehensive integration tests using Testcontainers to verify the distributed transaction functionality between Oracle DB and IBM MQ.
+This project includes integration tests using Testcontainers to verify the distributed
+transaction functionality between Oracle DB and IBM MQ via Atomikos.
+
+---
+
+## Correct XA test setup
+
+The application under test uses **genuine XA resources**:
+
+```
+OracleXADataSource  →  AtomikosDataSourceBean  →  JTA (Atomikos)
+MQXAConnectionFactory  →  AtomikosConnectionFactoryBean  →  JTA (Atomikos)
+```
+
+`localTransactionMode` is **NOT** enabled on the Atomikos MQ connection factory.
+Both Oracle and IBM MQ participate in the same global Atomikos JTA transaction.
+
+Test/admin connections are **separate and intentionally non-XA**.
+They exist only to send test input and inspect results:
+
+| Connection | Path | Participates in XA? |
+|---|---|---|
+| Application Oracle | via Atomikos AtomikosDataSourceBean | Yes |
+| Application IBM MQ | via Atomikos AtomikosConnectionFactoryBean | Yes |
+| Test admin Oracle | direct JDBC (DriverManager) | No |
+| Test admin IBM MQ | MQConnectionFactory (non-XA) | No |
+
+---
+
+## Toxiproxy topology
+
+All **application** traffic is routed through Toxiproxy containers to allow
+controlled network fault injection:
+
+```
+Spring Boot / Atomikos  -->  Toxiproxy (Oracle proxy)  -->  Oracle container
+Spring Boot / Atomikos  -->  Toxiproxy (MQ proxy)      -->  IBM MQ container
+
+JUnit verifier  ----direct (no Toxiproxy)---->  Oracle container
+JUnit verifier  ----direct (no Toxiproxy)---->  IBM MQ container
+```
+
+This separation is critical: when the application's Oracle connection is deliberately
+broken via Toxiproxy, the test can still inspect both Oracle and IBM MQ directly to
+determine their real committed state.
+
+Spring Boot is configured dynamically via `@DynamicPropertySource`:
+
+```
+spring.datasource.url  →  jdbc:oracle:thin:@<toxiproxy-host>:<oracle-proxy-port>/XEPDB1
+ibm.mq.connName        →  <toxiproxy-host>(<mq-proxy-port>)
+```
+
+---
+
+## Current fault coverage
+
+This PR contains **only the first Oracle connectivity failure scenario**.
+
+| Test | Coverage |
+|---|---|
+| `proxySanityCheck_oracleProxyRoutesTraffic` | Proves the application really routes through Toxiproxy |
+| `baselineXaFlow_messageProcessedAtomically` | Normal successful XA commit |
+| `oracleNetworkFailureMustNotCommitMqMessageWithoutDbRecord` | Oracle unavailable → both Oracle and MQ must be absent (no partial commit) |
+
+Exact `PREPARE` / `COMMIT` / recovery fault injection will be added in follow-up PRs.
+
+---
 
 ## Prerequisites
 
-- Docker installed and running
+- Docker installed and running (see **Docker setup on Ubuntu** below)
 - Maven 3.6+
 - Java 17+
-- Sufficient memory for running Oracle and IBM MQ containers (recommended: 8GB+ RAM)
+- Sufficient memory for containers (recommended: 8 GB+ RAM)
+
+### Docker setup on Ubuntu
+
+If you see `Could not find a valid Docker environment` when running the tests, the most
+common causes are:
+
+**1. Missing docker group membership (standard Docker Engine)**
+
+```bash
+sudo usermod -aG docker $USER
+# Log out and log back in for the change to take effect
+# Then verify:
+docker ps
+```
+
+**2. Rootless Docker (socket at a non-default path)**
+
+```bash
+# Find the actual socket path
+docker context inspect | grep Host
+
+# Export the socket in your shell or add it to your IntelliJ run configuration
+export DOCKER_HOST=unix:///run/user/$(id -u)/docker.sock
+```
+
+On the first test run the test's static initialiser also probes common socket paths
+and writes the detected value to `~/.testcontainers.properties` automatically, so
+subsequent runs from the same user account will work without exporting `DOCKER_HOST`.
 
 ## Running Tests
 
@@ -22,148 +117,68 @@ mvn test
 ### Single Test
 
 ```bash
-mvn test -Dtest=MessageProcessingIntegrationTest#testMessageProcessingFlow
+mvn test -Dtest=MessageProcessingIntegrationTest#baselineXaFlow_messageProcessedAtomically
 ```
-
-## Test Scenarios
-
-### 1. testMessageProcessingFlow
-
-Tests the complete end-to-end message processing flow:
-
-1. Sends a JSON message to `DEV.QUEUE.1`
-2. Message is received and processed
-3. Data is saved to Oracle database
-4. Confirmation message is sent to `DEV.QUEUE.2`
-
-**Expected Result:** Message is successfully processed, database record is created, and output message is received.
-
-### 2. testMultipleMessages
-
-Tests concurrent message handling:
-
-1. Sends 3 messages to the input queue
-2. All messages are processed
-3. All database records are created
-4. All confirmation messages are sent
-
-**Expected Result:** All 3 messages are processed successfully.
-
-### 3. testTransactionRollback
-
-Tests transactional integrity:
-
-1. Sends a valid message
-2. Verifies successful processing
-
-**Note:** In a production scenario, this test would verify that on failure, both database and MQ operations are rolled back together.
 
 ## Test Containers
 
-The integration tests use the following containers:
+| Container | Image | Purpose |
+|---|---|---|
+| Oracle | `gvenzl/oracle-free:23-slim-faststart` | Database |
+| IBM MQ | `icr.io/ibm-messaging/mq:9.3.4.0-r1` | Message broker |
+| Toxiproxy | `ghcr.io/shopify/toxiproxy:2.7.0` | Network fault injection |
 
-### Oracle Database
-- Image: `gvenzl/oracle-free:23-slim-faststart`
-- Database: XEPDB1
-- Username: testuser
-- Password: testpass
-
-### IBM MQ
-- Image: `icr.io/ibm-messaging/mq:latest`
-- Queue Manager: QM1
-- Admin Password: passw0rd
-- Exposed Ports: 1414 (MQ), 9443 (Web Console)
-
-## Test Configuration
-
-Test-specific configuration is in `src/test/resources/application.properties`:
-
-```properties
-spring.jpa.hibernate.ddl-auto=create-drop
-logging.level.com.example.atomikos=DEBUG
-```
-
-The containers are started automatically and configured via `@DynamicPropertySource` in the test class.
+---
 
 ## Troubleshooting
 
+### Could not find a valid Docker environment
+
+See the **Docker setup on Ubuntu** section under Prerequisites above.
+
+### client version 1.32 is too old (minikube conflict)
+
+If you have minikube installed it may export `DOCKER_API_VERSION=1.32` into your shell, which
+causes `docker-java` to send that version to the Docker daemon. Docker daemons built after 2020
+require a minimum API version of `1.40` and reject `1.32` with this error.
+
+**`mvn test` is not affected** — the Maven Surefire plugin is configured to set
+`DOCKER_API_VERSION=1.41` in the forked test JVM, overriding whatever the shell exports.
+
+**Running tests from an IDE** (IntelliJ / Eclipse): add the environment variable to your run
+configuration:
+```
+DOCKER_API_VERSION=1.41
+```
+Or unset it in your shell before launching the IDE:
+```bash
+unset DOCKER_API_VERSION
+```
+
 ### Tests Timeout
 
-If tests timeout, it may be because:
-- Docker daemon is slow to pull images
-- Insufficient system resources
-- Oracle container taking too long to start
-
-**Solution:** Increase timeout in test configuration or pull images beforehand:
+Pull images beforehand:
 
 ```bash
 docker pull gvenzl/oracle-free:23-slim-faststart
-docker pull icr.io/ibm-messaging/mq:latest
+docker pull icr.io/ibm-messaging/mq:9.3.4.0-r1
+docker pull ghcr.io/shopify/toxiproxy:2.7.0
 ```
-
-### Connection Refused
-
-If you get connection refused errors:
-- Ensure Docker is running
-- Check that ports 1414 and 1521 are not in use
-- Verify testcontainers can access Docker socket
 
 ### Out of Memory
 
-Oracle and IBM MQ containers require significant memory:
-- Oracle: ~2GB
-- IBM MQ: ~1GB
+Oracle (~2 GB) and IBM MQ (~1 GB) require significant memory.
+Increase Docker memory allocation or run tests individually.
 
-**Solution:** Increase Docker memory allocation or run tests individually.
+---
 
-## Manual Testing
+## Follow-up (planned)
 
-You can also run the application manually:
+Later PRs will inject failures at specific XA phases:
 
-1. Start Oracle database:
-```bash
-docker run --name oracle-db -p 1521:1521 -e ORACLE_PASSWORD=oracle gvenzl/oracle-free:23-slim-faststart
-```
+- `PREPARE` phase failure
+- `COMMIT` phase failure
+- `ROLLBACK` failure
+- Process crash/restart during 2PC
+- Recovery from Atomikos transaction log
 
-2. Start IBM MQ:
-```bash
-docker run --name ibm-mq -p 1414:1414 -p 9443:9443 \
-  -e LICENSE=accept \
-  -e MQ_QMGR_NAME=QM1 \
-  -e MQ_APP_PASSWORD=passw0rd \
-  icr.io/ibm-messaging/mq:latest
-```
-
-3. Run the application:
-```bash
-mvn spring-boot:run
-```
-
-4. Send test messages using IBM MQ Explorer or command line tools.
-
-## Viewing Test Results
-
-Test results are available in:
-- `target/surefire-reports/` - Detailed test reports
-- Console output - Real-time test execution logs
-
-## Continuous Integration
-
-For CI/CD pipelines:
-
-1. Ensure Docker-in-Docker or Docker socket mounting is available
-2. Allocate sufficient resources to the CI job
-3. Consider pulling images beforehand to reduce build time
-4. Use test result reports for visualization
-
-Example GitHub Actions configuration:
-
-```yaml
-steps:
-  - uses: actions/checkout@v3
-  - uses: actions/setup-java@v3
-    with:
-      java-version: '17'
-  - name: Run tests
-    run: mvn test
-```

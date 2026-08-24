@@ -129,6 +129,13 @@
             <artifactId>awaitility</artifactId>
             <scope>test</scope>
         </dependency>
+        <!-- Toxiproxy for network fault injection -->
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>toxiproxy</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
     </dependencies>
 
     <build>
@@ -141,12 +148,13 @@
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-surefire-plugin</artifactId>
                 <configuration>
-                    <systemPropertyVariables>
-                        <!-- docker-java reads Docker API version from "api.version" JVM system property.
-                             Without this, it defaults to 1.32, which is rejected by Docker daemons
-                             that require a minimum API version of 1.40. -->
-                        <api.version>1.41</api.version>
-                    </systemPropertyVariables>
+                    <environmentVariables>
+                        <!-- Override DOCKER_API_VERSION that minikube may export (e.g. 1.32).
+                             docker-java reads this env-var verbatim and sends it to the daemon.
+                             Setting it to 1.41 ensures docker-java uses a version the daemon
+                             accepts (Docker requires >= 1.40). -->
+                        <DOCKER_API_VERSION>1.41</DOCKER_API_VERSION>
+                    </environmentVariables>
                 </configuration>
             </plugin>
         </plugins>
