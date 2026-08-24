@@ -26,7 +26,6 @@ import org.testcontainers.utility.TestcontainersConfiguration;
 
 import javax.jms.*;
 import java.io.IOException;
-import java.lang.reflect.Field;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.sql.Connection;
@@ -35,7 +34,6 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.time.Duration;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.awaitility.Awaitility.await;
@@ -81,11 +79,18 @@ class MessageProcessingIntegrationTest {
     // ------------------------------------------------------------------
     static {
         // minikube exports DOCKER_API_VERSION=1.32 into the shell. docker-java reads this
-        // env-var verbatim, causing Docker daemons that require >= 1.40 to reject every
-        // request. Maven Surefire overrides it via <environmentVariables>, but IntelliJ and
-        // other IDEs inherit the shell value. Clearing it here forces docker-java to
-        // negotiate the API version with the daemon instead of using a hardcoded old value.
-        clearEnv("DOCKER_API_VERSION");
+        // env-var verbatim and testcontainers' DockerClientProviderStrategy also hard-codes
+        // 1.32 as the fallback when no API version is set. Docker daemons built after 2020
+        // reject 1.32 with "client version 1.32 is too old. Minimum supported API version is 1.40".
+        //
+        // docker-java's config chain (highest precedence last):
+        //   defaults → user-home properties → env vars → system properties
+        //
+        // Setting the system property here overrides any env-var value regardless of what the
+        // shell (e.g. minikube) has exported. This works from IntelliJ, Maven, and any IDE.
+        // Maven Surefire additionally sets DOCKER_API_VERSION=1.41 as an env override for the
+        // forked JVM so both paths are covered.
+        System.setProperty("api.version", "1.41");
 
         // Only auto-detect when neither the environment variable nor the user
         // property has already been configured.
@@ -393,35 +398,4 @@ class MessageProcessingIntegrationTest {
                 "{\"messageId\":\"%s\",\"content\":\"Test content for %s\",\"status\":\"NEW\"}",
                 messageId, messageId);
     }
-
-    /**
-     * Removes a key from the JVM's environment map at runtime. Java does not expose
-     * {@code System.setenv}, but the underlying map is accessible via reflection on all
-     * JVM implementations used in practice (HotSpot / OpenJDK, GraalVM).
-     *
-     * <p>This is needed to neutralise {@code DOCKER_API_VERSION=1.32} that minikube
-     * exports into the shell before the IDE or Maven process starts. docker-java reads
-     * the variable verbatim; clearing it here forces automatic API-version negotiation.</p>
-     */
-    @SuppressWarnings("unchecked")
-    private static void clearEnv(String name) {
-        try {
-            Class<?> processEnvClass = Class.forName("java.lang.ProcessEnvironment");
-            Field theEnvField = processEnvClass.getDeclaredField("theEnvironment");
-            theEnvField.setAccessible(true);
-            Map<Object, Object> env = (Map<Object, Object>) theEnvField.get(null);
-            env.entrySet().removeIf(e -> name.equals(e.getKey().toString()));
-
-            Field theCaseInsensitiveEnvField =
-                    processEnvClass.getDeclaredField("theCaseInsensitiveEnvironment");
-            theCaseInsensitiveEnvField.setAccessible(true);
-            Map<String, String> ciEnv =
-                    (Map<String, String>) theCaseInsensitiveEnvField.get(null);
-            ciEnv.remove(name);
-        } catch (Exception ignored) {
-            // Non-HotSpot JVM or future JVM with restricted reflection — no-op.
-            // The Surefire <environmentVariables> override covers the mvn-test path.
-        }
-    }
 }
-
