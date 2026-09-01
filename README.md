@@ -1,4 +1,7 @@
 # spring-boot-atomikos-oracle-db-ibm-mq
+
+[![Build and Test](https://github.com/rrobetti/spring-boot-atomikos-oracle-db-ibm-mq/actions/workflows/main.yml/badge.svg?branch=main)](https://github.com/rrobetti/spring-boot-atomikos-oracle-db-ibm-mq/actions/workflows/main.yml)
+
 Spring Boot application configured with Atomikos for distributed transactions between Oracle DB and IBM MQ
 
 ## Overview
