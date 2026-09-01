@@ -3,6 +3,8 @@ package com.example.atomikos;
 import com.example.atomikos.config.AdminJmsConfig;
 import com.example.atomikos.config.TestJmsConfig;
 import com.example.atomikos.repository.MessageDataRepository;
+import com.example.atomikos.support.FaultInjectingOracleXADataSource;
+import com.example.atomikos.support.TestXaFaultEngine;
 import com.example.atomikos.support.ToxiproxyTestSupport;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
@@ -36,6 +38,10 @@ import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 
+import static com.example.atomikos.support.TestXaFaultEngine.Operation.*;
+import static com.example.atomikos.support.TestXaFaultEngine.Position.*;
+import static javax.transaction.xa.XAException.XAER_RMERR;
+import static javax.transaction.xa.XAException.XAER_RMFAIL;
 import static org.awaitility.Awaitility.await;
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -198,6 +204,7 @@ class MessageProcessingIntegrationTest {
 
     @AfterEach
     void resetProxies() throws IOException {
+        FaultInjectingOracleXADataSource.engine().reset();
         toxiproxy.resetAll();
     }
 
@@ -214,6 +221,8 @@ class MessageProcessingIntegrationTest {
                 "/XEPDB1");
         registry.add("spring.datasource.username", oracleContainer::getUsername);
         registry.add("spring.datasource.password", oracleContainer::getPassword);
+        registry.add("spring.datasource.xa-data-source-class-name",
+                () -> FaultInjectingOracleXADataSource.class.getName());
 
         // Application IBM MQ path goes through Toxiproxy
         registry.add("ibm.mq.queueManager", () -> "QM1");
@@ -323,6 +332,92 @@ class MessageProcessingIntegrationTest {
             toxiproxy.enableOracleProxy();
         }
 
+        // ------------------------------------------------------------------
+        // XA lifecycle fault injection tests
+        // ------------------------------------------------------------------
+
+        /**
+         * Scenario: the Oracle XA resource fails before PREPARE.
+         * <p>
+         * This breaks phase 1 of 2PC before Oracle can vote prepared. Atomikos must
+         * abort the global transaction; the observable invariant is that no output
+         * message is committed without the matching Oracle row.
+         */
+        @Test
+        void xaPrepareFailureMustNotCommitPartialWork() throws Exception {
+            String messageId = "FAULT-PREPARE-" + UUID.randomUUID();
+            clearState(messageId);
+
+            TestXaFaultEngine engine = FaultInjectingOracleXADataSource.engine();
+            TestXaFaultEngine.Rule prepareFault = engine.throwOnce(
+                    FaultInjectingOracleXADataSource.RESOURCE_ID, PREPARE, BEFORE, XAER_RMFAIL);
+
+            adminJmsTemplate.convertAndSend("DEV.QUEUE.1", inputJson(messageId));
+
+            awaitRuleFired(prepareFault, "Oracle PREPARE fault should fire");
+            assertNoMqOutputWithoutOracleRow(messageId);
+        }
+
+        /**
+         * Scenario: the Oracle XA resource fails before COMMIT.
+         * <p>
+         * This breaks phase 2 after prepare has completed and verifies that the
+         * testkit reaches the COMMIT phase while still enforcing the cross-resource
+         * atomicity invariant.
+         */
+        @Test
+        void xaCommitFailureMustNotCommitMqMessageWithoutDbRecord() throws Exception {
+            String messageId = "FAULT-COMMIT-" + UUID.randomUUID();
+            clearState(messageId);
+
+            TestXaFaultEngine engine = FaultInjectingOracleXADataSource.engine();
+            TestXaFaultEngine.Rule commitFault = engine.throwOnce(
+                    FaultInjectingOracleXADataSource.RESOURCE_ID, COMMIT, BEFORE, XAER_RMFAIL);
+
+            adminJmsTemplate.convertAndSend("DEV.QUEUE.1", inputJson(messageId));
+
+            awaitRuleFired(commitFault, "Oracle COMMIT fault should fire");
+            assertNoMqOutputWithoutOracleRow(messageId);
+        }
+
+        /**
+         * Scenario: Oracle successfully prepares, IBM MQ is then made unavailable,
+         * and Oracle rollback is forced to fail.
+         * <p>
+         * This exercises the abort path after a successful phase-1 vote and proves
+         * that rollback-time failures are observable in the XA lifecycle journal.
+         */
+        @Test
+        void xaRollbackFailureAfterMqPrepareBreakMustBeObserved() throws Exception {
+            String messageId = "FAULT-ROLLBACK-" + UUID.randomUUID();
+            clearState(messageId);
+
+            TestXaFaultEngine engine = FaultInjectingOracleXADataSource.engine();
+            TestXaFaultEngine.Rule mqBreak = engine.addRule(
+                    FaultInjectingOracleXADataSource.RESOURCE_ID,
+                    PREPARE,
+                    AFTER_SUCCESS,
+                    TestXaFaultEngine.callback(event -> {
+                        try {
+                            toxiproxy.disableMqProxy();
+                        } catch (IOException e) {
+                            throw new RuntimeException(e);
+                        }
+                    }));
+            TestXaFaultEngine.Rule rollbackFault = engine.throwOnce(
+                    FaultInjectingOracleXADataSource.RESOURCE_ID, ROLLBACK, BEFORE, XAER_RMERR);
+
+            try {
+                adminJmsTemplate.convertAndSend("DEV.QUEUE.1", inputJson(messageId));
+
+                awaitRuleFired(mqBreak, "IBM MQ proxy should be disabled after Oracle PREPARE");
+                awaitRuleFired(rollbackFault, "Oracle ROLLBACK fault should fire");
+                assertNoMqOutputWithoutOracleRow(messageId);
+            } finally {
+                toxiproxy.enableMqProxy();
+            }
+        }
+
         // After restoration the input may be redelivered and succeed.
         // This section documents (but does not mandate) that eventual recovery is fine.
         // The key invariant above has already been asserted.
@@ -364,6 +459,22 @@ class MessageProcessingIntegrationTest {
                     Object msg = msgs.nextElement();
                     if (msg instanceof TextMessage tm && tm.getText().contains(messageId)) {
                         return true;
+                    }
+
+                    private void awaitRuleFired(TestXaFaultEngine.Rule rule, String message) {
+                        await()
+                                .atMost(Duration.ofSeconds(30))
+                                .pollInterval(Duration.ofMillis(250))
+                                .untilAsserted(() -> assertTrue(rule.fired(), message));
+                    }
+
+                    private void assertNoMqOutputWithoutOracleRow(String messageId) throws JMSException {
+                        boolean oracleHasRow = oracleContains(messageId);
+                        boolean outputHasMessage = outputQueueContains(messageId);
+
+                        assertFalse(outputHasMessage && !oracleHasRow,
+                                "XA ATOMICITY VIOLATION: IBM MQ output message was committed " +
+                                        "while the Oracle record is absent for messageId=" + messageId);
                     }
                 }
             }
