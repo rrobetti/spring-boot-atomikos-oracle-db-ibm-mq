@@ -35,6 +35,9 @@ public class AtomikosConfig {
     @Value("${spring.datasource.password}")
     private String dbPassword;
 
+    @Value("${spring.datasource.xa-data-source-class-name:oracle.jdbc.xa.client.OracleXADataSource}")
+    private String xaDataSourceClassName;
+
     @Value("${ibm.mq.queueManager}")
     private String queueManager;
 
@@ -84,7 +87,7 @@ public class AtomikosConfig {
     public DataSource dataSource() {
         AtomikosDataSourceBean dataSource = new AtomikosDataSourceBean();
         dataSource.setUniqueResourceName("oracleDataSource");
-        dataSource.setXaDataSourceClassName("oracle.jdbc.xa.client.OracleXADataSource");
+        dataSource.setXaDataSourceClassName(xaDataSourceClassName);
         
         Properties properties = new Properties();
         properties.setProperty("URL", dbUrl);

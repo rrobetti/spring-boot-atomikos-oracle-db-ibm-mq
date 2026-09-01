@@ -59,15 +59,41 @@ ibm.mq.connName        →  <toxiproxy-host>(<mq-proxy-port>)
 
 ## Current fault coverage
 
-This PR contains **only the first Oracle connectivity failure scenario**.
+The integration tests now cover both coarse network faults and phase-aware XA
+lifecycle faults inspired by
+[`rrobetti/j-xa-tester`](https://github.com/rrobetti/j-xa-tester).
 
 | Test | Coverage |
 |---|---|
 | `proxySanityCheck_oracleProxyRoutesTraffic` | Proves the application really routes through Toxiproxy |
 | `baselineXaFlow_messageProcessedAtomically` | Normal successful XA commit |
 | `oracleNetworkFailureMustNotCommitMqMessageWithoutDbRecord` | Oracle unavailable → both Oracle and MQ must be absent (no partial commit) |
+| `xaPrepareFailureMustNotCommitPartialWork` | Synthetic Oracle `PREPARE` failure → phase 1 abort must not expose MQ output without the Oracle row |
+| `xaCommitFailureMustNotCommitMqMessageWithoutDbRecord` | Synthetic Oracle `COMMIT` failure → phase 2 break must still preserve the externally visible atomicity invariant |
+| `xaRollbackFailureAfterMqPrepareBreakMustBeObserved` | Oracle prepares, the synthetic testkit reports prepare failure, and Oracle `ROLLBACK` fails → rollback-path failures are observable and must not create partial output |
 
-Exact `PREPARE` / `COMMIT` / recovery fault injection will be added in follow-up PRs.
+### XA lifecycle fault rationale
+
+`src/test/java/com/example/atomikos/support/FaultInjectingOracleXADataSource.java`
+wraps the Oracle `XAResource` used by Atomikos during tests and records each
+XA lifecycle call (`START`, `END`, `PREPARE`, `COMMIT`, `ROLLBACK`, recovery
+operations, timeout calls, and `isSameRM`). The companion
+`TestXaFaultEngine` keeps the same testkit shape as `j-xa-tester`: tests add
+a per-scenario rule matching a resource, operation, and position (`BEFORE`,
+`AFTER_SUCCESS`, or `AFTER_FAILURE`), and the rule injects a deterministic
+`XAException` or callback at that exact point.
+
+The added scenarios deliberately break different parts of the two-phase commit
+lifecycle:
+
+- `PREPARE` failure verifies phase-1 voting failure aborts the whole global
+  transaction before either resource exposes committed work.
+- `COMMIT` failure verifies phase-2 failures are detected at the XA boundary
+  and do not result in an MQ output message without the corresponding database
+  row.
+- `ROLLBACK` failure verifies that, after a successful Oracle prepare vote and
+  a synthetic prepare failure report, Atomikos drives Oracle rollback and the
+  rollback failure is observable rather than silently skipped.
 
 ---
 
@@ -176,9 +202,5 @@ Increase Docker memory allocation or run tests individually.
 
 Later PRs will inject failures at specific XA phases:
 
-- `PREPARE` phase failure
-- `COMMIT` phase failure
-- `ROLLBACK` failure
 - Process crash/restart during 2PC
 - Recovery from Atomikos transaction log
-
