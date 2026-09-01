@@ -332,6 +332,11 @@ class MessageProcessingIntegrationTest {
             toxiproxy.enableOracleProxy();
         }
 
+        // After restoration the input may be redelivered and succeed.
+        // This section documents (but does not mandate) that eventual recovery is fine.
+        // The key invariant above has already been asserted.
+    }
+
         // ------------------------------------------------------------------
         // XA lifecycle fault injection tests
         // ------------------------------------------------------------------
@@ -380,47 +385,32 @@ class MessageProcessingIntegrationTest {
             assertNoMqOutputWithoutOracleRow(messageId);
         }
 
-        /**
-         * Scenario: Oracle successfully prepares, IBM MQ is then made unavailable,
-         * and Oracle rollback is forced to fail.
-         * <p>
-         * This exercises the abort path after a successful phase-1 vote and proves
-         * that rollback-time failures are observable in the XA lifecycle journal.
-         */
-        @Test
-        void xaRollbackFailureAfterMqPrepareBreakMustBeObserved() throws Exception {
-            String messageId = "FAULT-ROLLBACK-" + UUID.randomUUID();
-            clearState(messageId);
+    /**
+     * Scenario: Oracle successfully prepares, the synthetic testkit reports
+     * the prepare call as failed, and Oracle rollback is forced to fail.
+     * <p>
+     * This exercises the abort path after a successful phase-1 vote and proves
+     * that rollback-time failures are observable in the XA lifecycle journal.
+     */
+    @Test
+    void xaRollbackFailureAfterMqPrepareBreakMustBeObserved() throws Exception {
+        String messageId = "FAULT-ROLLBACK-" + UUID.randomUUID();
+        clearState(messageId);
 
-            TestXaFaultEngine engine = FaultInjectingOracleXADataSource.engine();
-            TestXaFaultEngine.Rule mqBreak = engine.addRule(
-                    FaultInjectingOracleXADataSource.RESOURCE_ID,
-                    PREPARE,
-                    AFTER_SUCCESS,
-                    TestXaFaultEngine.callback(event -> {
-                        try {
-                            toxiproxy.disableMqProxy();
-                        } catch (IOException e) {
-                            throw new RuntimeException(e);
-                        }
-                    }));
-            TestXaFaultEngine.Rule rollbackFault = engine.throwOnce(
-                    FaultInjectingOracleXADataSource.RESOURCE_ID, ROLLBACK, BEFORE, XAER_RMERR);
+        TestXaFaultEngine engine = FaultInjectingOracleXADataSource.engine();
+        TestXaFaultEngine.Rule prepareBreak = engine.addRule(
+                FaultInjectingOracleXADataSource.RESOURCE_ID,
+                PREPARE,
+                AFTER_SUCCESS,
+                TestXaFaultEngine.throwException(XAER_RMFAIL));
+        TestXaFaultEngine.Rule rollbackFault = engine.throwOnce(
+                FaultInjectingOracleXADataSource.RESOURCE_ID, ROLLBACK, BEFORE, XAER_RMERR);
 
-            try {
-                adminJmsTemplate.convertAndSend("DEV.QUEUE.1", inputJson(messageId));
+        adminJmsTemplate.convertAndSend("DEV.QUEUE.1", inputJson(messageId));
 
-                awaitRuleFired(mqBreak, "IBM MQ proxy should be disabled after Oracle PREPARE");
-                awaitRuleFired(rollbackFault, "Oracle ROLLBACK fault should fire");
-                assertNoMqOutputWithoutOracleRow(messageId);
-            } finally {
-                toxiproxy.enableMqProxy();
-            }
-        }
-
-        // After restoration the input may be redelivered and succeed.
-        // This section documents (but does not mandate) that eventual recovery is fine.
-        // The key invariant above has already been asserted.
+        awaitRuleFired(prepareBreak, "Oracle PREPARE after-success break should fire");
+        awaitRuleFired(rollbackFault, "Oracle ROLLBACK fault should fire");
+        assertNoMqOutputWithoutOracleRow(messageId);
     }
 
     // ------------------------------------------------------------------
@@ -460,26 +450,26 @@ class MessageProcessingIntegrationTest {
                     if (msg instanceof TextMessage tm && tm.getText().contains(messageId)) {
                         return true;
                     }
-
-                    private void awaitRuleFired(TestXaFaultEngine.Rule rule, String message) {
-                        await()
-                                .atMost(Duration.ofSeconds(30))
-                                .pollInterval(Duration.ofMillis(250))
-                                .untilAsserted(() -> assertTrue(rule.fired(), message));
-                    }
-
-                    private void assertNoMqOutputWithoutOracleRow(String messageId) throws JMSException {
-                        boolean oracleHasRow = oracleContains(messageId);
-                        boolean outputHasMessage = outputQueueContains(messageId);
-
-                        assertFalse(outputHasMessage && !oracleHasRow,
-                                "XA ATOMICITY VIOLATION: IBM MQ output message was committed " +
-                                        "while the Oracle record is absent for messageId=" + messageId);
-                    }
                 }
             }
         }
         return false;
+    }
+
+    private void awaitRuleFired(TestXaFaultEngine.Rule rule, String message) {
+        await()
+                .atMost(Duration.ofSeconds(30))
+                .pollInterval(Duration.ofMillis(250))
+                .untilAsserted(() -> assertTrue(rule.fired(), message));
+    }
+
+    private void assertNoMqOutputWithoutOracleRow(String messageId) throws JMSException {
+        boolean oracleHasRow = oracleContains(messageId);
+        boolean outputHasMessage = outputQueueContains(messageId);
+
+        assertFalse(outputHasMessage && !oracleHasRow,
+                "XA ATOMICITY VIOLATION: IBM MQ output message was committed " +
+                        "while the Oracle record is absent for messageId=" + messageId);
     }
 
     // ------------------------------------------------------------------

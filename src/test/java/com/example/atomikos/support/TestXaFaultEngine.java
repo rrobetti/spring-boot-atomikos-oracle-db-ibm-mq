@@ -114,10 +114,10 @@ public class TestXaFaultEngine {
         for (Rule rule : rules) {
             rule.apply(event);
         }
+    }
 
-        @FunctionalInterface
-        public interface XaAction {
-            void execute(Event event) throws XAException;
-        }
+    @FunctionalInterface
+    public interface XaAction {
+        void execute(Event event) throws XAException;
     }
 }

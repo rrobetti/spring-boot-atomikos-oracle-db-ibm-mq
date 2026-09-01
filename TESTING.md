@@ -70,7 +70,7 @@ lifecycle faults inspired by
 | `oracleNetworkFailureMustNotCommitMqMessageWithoutDbRecord` | Oracle unavailable → both Oracle and MQ must be absent (no partial commit) |
 | `xaPrepareFailureMustNotCommitPartialWork` | Synthetic Oracle `PREPARE` failure → phase 1 abort must not expose MQ output without the Oracle row |
 | `xaCommitFailureMustNotCommitMqMessageWithoutDbRecord` | Synthetic Oracle `COMMIT` failure → phase 2 break must still preserve the externally visible atomicity invariant |
-| `xaRollbackFailureAfterMqPrepareBreakMustBeObserved` | Oracle prepares, MQ connectivity is broken, and Oracle `ROLLBACK` fails → rollback-path failures are observable and must not create partial output |
+| `xaRollbackFailureAfterMqPrepareBreakMustBeObserved` | Oracle prepares, the synthetic testkit reports prepare failure, and Oracle `ROLLBACK` fails → rollback-path failures are observable and must not create partial output |
 
 ### XA lifecycle fault rationale
 
@@ -92,8 +92,8 @@ lifecycle:
   and do not result in an MQ output message without the corresponding database
   row.
 - `ROLLBACK` failure verifies that, after a successful Oracle prepare vote and
-  a forced MQ failure, Atomikos drives Oracle rollback and the rollback failure
-  is observable rather than silently skipped.
+  a synthetic prepare failure report, Atomikos drives Oracle rollback and the
+  rollback failure is observable rather than silently skipped.
 
 ---
 
