@@ -22,6 +22,14 @@ All operations are wrapped in a distributed transaction managed by Atomikos, ens
 - **Hibernate 5.6**: ORM for database operations
 - **Testcontainers**: Integration testing with Oracle and IBM MQ containers
 
+## Database and Messaging Versions
+
+| Component | Version |
+|-----------|---------|
+| Oracle Database | 23.3.0 (`gvenzl/oracle-free:23-slim-faststart`) |
+| Oracle JDBC Driver (`ojdbc11`) | 23.3.0.23.09 |
+| IBM MQ queue manager (`QM1`) | 9.3.4.0-r1 (`icr.io/ibm-messaging/mq:9.3.4.0-r1`) |
+
 ## Database Schema
 
 The application uses a single table `MESSAGE_DATA`:
@@ -125,4 +133,3 @@ Atomikos ensures that both database and MQ operations succeed or fail together:
 ## License
 
 This project is licensed under the MIT License.
-
